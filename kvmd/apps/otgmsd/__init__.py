@@ -23,6 +23,8 @@
 import os
 import errno
 import argparse
+import signal
+import psutil
 
 from ...validators.basic import valid_bool
 from ...validators.basic import valid_int_f0
@@ -32,6 +34,19 @@ from ... import usb
 
 from .. import init
 
+def _unlock() -> None:
+    # https://github.com/torvalds/linux/blob/3039fad/drivers/usb/gadget/function/f_mass_storage.c#L2924
+    found = False
+    for proc in psutil.process_iter():
+        attrs = proc.as_dict(attrs=["name", "exe", "pid"])
+        if attrs.get("name") == "file-storage" and not attrs.get("exe"):
+            try:
+                proc.send_signal(signal.SIGUSR1)
+                found = True
+            except Exception as err:
+                raise SystemExit(f"Can't send SIGUSR1 to MSD kernel thread with pid={attrs['pid']}: {err}")
+    if not found:
+        raise SystemExit("Can't find MSD kernel thread")
 
 # =====
 def _get_param_path(gadget: str, instance: int, param: str) -> str:
@@ -77,7 +92,7 @@ def main(argv: (list[str] | None)=None) -> None:
     parser.add_argument("--eject", action="store_true",
                         help="Eject the image")
     parser.add_argument("--unlock", action="store_true",
-                        help="Does nothing, just for backward compatibility")
+                        help="Send SIGUSR1 to MSD kernel thread")
     options = parser.parse_args(argv[1:])
 
     if config.kvmd.msd.type != "otg":
@@ -87,8 +102,11 @@ def main(argv: (list[str] | None)=None) -> None:
     set_param = (lambda param, value: _set_param(config.otg.gadget, options.instance, param, value))
     get_param = (lambda param: _get_param(config.otg.gadget, options.instance, param))
 
+    if options.unlock:
+        _unlock()
+
     if options.eject:
-        set_param("forced_eject", "")
+        set_param("file", "")
 
     if options.set_cdrom is not None:
         set_param("cdrom", str(int(options.set_cdrom)))

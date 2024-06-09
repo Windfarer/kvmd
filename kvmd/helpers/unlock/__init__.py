@@ -2,7 +2,7 @@
 #                                                                            #
 #    KVMD - The main PiKVM daemon.                                           #
 #                                                                            #
-#    Copyright (C) 2018-2024  Maxim Devaev <mdevaev@gmail.com>               #
+#    Copyright (C) 2018-2022  Maxim Devaev <mdevaev@gmail.com>               #
 #                                                                            #
 #    This program is free software: you can redistribute it and/or modify    #
 #    it under the terms of the GNU General Public License as published by    #
@@ -20,44 +20,39 @@
 # ========================================================================== #
 
 
-import subprocess
+import sys
+import signal
 
-from .logging import get_logger
-
-from . import tools
-from . import aioproc
+import psutil
 
 
 # =====
-async def remount(name: str, base_cmd: list[str], rw: bool) -> bool:
-    logger = get_logger(1)
-    mode = ("rw" if rw else "ro")
-    cmd = [
-        part.format(mode=mode)
-        for part in base_cmd
-    ]
-    logger.info("Remounting %s storage to %s: %s ...", name, mode.upper(), tools.cmdfmt(cmd))
-    try:
-        await _run_helper(cmd)
-    except Exception:
-        logger.error("Can't remount internal storage")
-        raise
-
-
-async def unlock_drive(base_cmd: list[str]) -> None:
-    logger = get_logger(0)
-    logger.info("Unlocking the drive ...")
-    try:
-        await _run_helper(base_cmd)
-    except Exception:
-        logger.error("Can't unlock the drive")
-        raise
+_PROCESS_NAME = "file-storage"
 
 
 # =====
-async def _run_helper(cmd: list[str]) -> None:
-    logger = get_logger(0)
-    logger.info("Executing helper %s ...", cmd)
-    proc = await aioproc.log_process(cmd, logger)
-    if proc.returncode != 0:
-        logger.error(f"Error while helper execution: pid={proc.pid}; retcode={proc.returncode}")
+def _log(msg: str) -> None:
+    print(msg, file=sys.stderr)
+
+
+def _unlock() -> None:
+    # https://github.com/torvalds/linux/blob/3039fad/drivers/usb/gadget/function/f_mass_storage.c#L2924
+    found = False
+    for proc in psutil.process_iter():
+        attrs = proc.as_dict(attrs=["name", "exe", "pid"])
+        if attrs.get("name") == _PROCESS_NAME and not attrs.get("exe"):
+            _log(f"Sending SIGUSR1 to MSD {_PROCESS_NAME!r} kernel thread with pid={attrs['pid']} ...")
+            try:
+                proc.send_signal(signal.SIGUSR1)
+                found = True
+            except Exception as err:
+                raise SystemExit(f"Can't send SIGUSR1 to MSD kernel thread with pid={attrs['pid']}: {err}")
+    if not found:
+        raise SystemExit(f"Can't find MSD kernel thread {_PROCESS_NAME!r}")
+
+
+# =====
+def main() -> None:
+    if len(sys.argv) != 2 or sys.argv[1] != "unlock":
+        raise SystemExit(f"Usage: {sys.argv[0]} [unlock]")
+    _unlock()

@@ -292,4 +292,4 @@ class Storage(_StorageDc):
     async def remount_rw(self, rw: bool, fatal: bool=True) -> None:
         if not (await aiohelpers.remount("MSD", self.__remount_cmd, rw)):
             if fatal:
-                raise MsdError("Can't execute remount helper")
+                pass

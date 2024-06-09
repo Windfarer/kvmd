@@ -2,7 +2,7 @@
 #                                                                            #
 #    KVMD - The main PiKVM daemon.                                           #
 #                                                                            #
-#    Copyright (C) 2018-2024  Maxim Devaev <mdevaev@gmail.com>               #
+#    Copyright (C) 2018-2022  Maxim Devaev <mdevaev@gmail.com>               #
 #                                                                            #
 #    This program is free software: you can redistribute it and/or modify    #
 #    it under the terms of the GNU General Public License as published by    #
@@ -20,44 +20,5 @@
 # ========================================================================== #
 
 
-import subprocess
-
-from .logging import get_logger
-
-from . import tools
-from . import aioproc
-
-
-# =====
-async def remount(name: str, base_cmd: list[str], rw: bool) -> bool:
-    logger = get_logger(1)
-    mode = ("rw" if rw else "ro")
-    cmd = [
-        part.format(mode=mode)
-        for part in base_cmd
-    ]
-    logger.info("Remounting %s storage to %s: %s ...", name, mode.upper(), tools.cmdfmt(cmd))
-    try:
-        await _run_helper(cmd)
-    except Exception:
-        logger.error("Can't remount internal storage")
-        raise
-
-
-async def unlock_drive(base_cmd: list[str]) -> None:
-    logger = get_logger(0)
-    logger.info("Unlocking the drive ...")
-    try:
-        await _run_helper(base_cmd)
-    except Exception:
-        logger.error("Can't unlock the drive")
-        raise
-
-
-# =====
-async def _run_helper(cmd: list[str]) -> None:
-    logger = get_logger(0)
-    logger.info("Executing helper %s ...", cmd)
-    proc = await aioproc.log_process(cmd, logger)
-    if proc.returncode != 0:
-        logger.error(f"Error while helper execution: pid={proc.pid}; retcode={proc.returncode}")
+from . import main
+main()

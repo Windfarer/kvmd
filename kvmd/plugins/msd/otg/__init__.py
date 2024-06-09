@@ -57,7 +57,7 @@ from .. import MsdFileWriter
 from .storage import Image
 from .storage import Storage
 from .drive import Drive
-
+from .... import aiohelpers
 
 # =====
 @dataclasses.dataclass(frozen=True)
@@ -119,6 +119,7 @@ class Plugin(BaseMsd):  # pylint: disable=too-many-instance-attributes
         sync_chunk_size: int,
 
         remount_cmd: list[str],
+        unlock_cmd: list[str],
 
         initial: dict,
 
@@ -128,6 +129,8 @@ class Plugin(BaseMsd):  # pylint: disable=too-many-instance-attributes
         self.__read_chunk_size = read_chunk_size
         self.__write_chunk_size = write_chunk_size
         self.__sync_chunk_size = sync_chunk_size
+
+        self.__unlock_cmd = unlock_cmd
 
         self.__initial_image: str = initial["image"]
         self.__initial_cdrom: bool = initial["cdrom"]
@@ -151,7 +154,10 @@ class Plugin(BaseMsd):  # pylint: disable=too-many-instance-attributes
             "read_chunk_size":   Option(65536,   type=functools.partial(valid_number, min=1024)),
             "write_chunk_size":  Option(65536,   type=functools.partial(valid_number, min=1024)),
             "sync_chunk_size":   Option(4194304, type=functools.partial(valid_number, min=1024)),
-
+            "unlock_cmd": Option([
+                "/usr/bin/sudo", "--non-interactive",
+                "/usr/bin/kvmd-helper-otgmsd-unlock", "unlock",
+            ], type=valid_command),
             "remount_cmd": Option([
                 "/usr/bin/sudo", "--non-interactive",
                 "/usr/bin/kvmd-helper-otgmsd-remount", "{mode}",
@@ -212,6 +218,7 @@ class Plugin(BaseMsd):  # pylint: disable=too-many-instance-attributes
     async def reset(self) -> None:
         async with self.__state.busy(check_online=False):
             try:
+                await self.__unlock_drive()
                 self.__drive.set_image_path("")
                 self.__drive.set_cdrom_flag(False)
                 self.__drive.set_rw_flag(False)
@@ -268,7 +275,7 @@ class Plugin(BaseMsd):  # pylint: disable=too-many-instance-attributes
                     raise MsdUnknownImageError()
 
                 assert self.__state.vd.image.in_storage
-
+                await self.__unlock_drive()
                 self.__drive.set_rw_flag(self.__state.vd.rw)
                 self.__drive.set_cdrom_flag(self.__state.vd.cdrom)
                 if self.__state.vd.rw:
@@ -276,6 +283,7 @@ class Plugin(BaseMsd):  # pylint: disable=too-many-instance-attributes
                 self.__drive.set_image_path(self.__state.vd.image.path)
 
             else:
+                await self.__unlock_drive()
                 self.__STATE_check_connected()
                 self.__drive.set_image_path("")
                 await self.__storage.remount_rw(False, fatal=False)
@@ -491,6 +499,7 @@ class Plugin(BaseMsd):  # pylint: disable=too-many-instance-attributes
             if (await image.exists()):
                 logger.info("Setting up initial image %r ...", self.__initial_image)
                 try:
+                    await self.__unlock_drive()
                     self.__drive.set_rw_flag(False)
                     self.__drive.set_cdrom_flag(self.__initial_cdrom)
                     self.__drive.set_image_path(image.path)
@@ -498,3 +507,8 @@ class Plugin(BaseMsd):  # pylint: disable=too-many-instance-attributes
                     logger.exception("Can't setup initial image: ignored")
             else:
                 logger.error("Can't find initial image %r: ignored", self.__initial_image)
+
+
+
+    async def __unlock_drive(self) -> None:
+        await aiohelpers.unlock_drive(self.__unlock_cmd)

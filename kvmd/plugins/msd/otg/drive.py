@@ -51,10 +51,8 @@ class Drive:
     # =====
 
     def set_image_path(self, path: str) -> None:
-        if path:
-            self.__set_param("file", path)
-        else:
-            self.__set_param("forced_eject", "")
+        self.__set_param("file", path)
+        
 
     def get_image_path(self) -> str:
         path = self.__get_param("file")
